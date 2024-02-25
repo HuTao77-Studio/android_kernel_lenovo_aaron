@@ -74,6 +74,10 @@ int AudDrv_GPIO_TDM_Select(int mode);
 
 int AudDrv_GPIO_I2S_Select(int bEnable);
 int AudDrv_GPIO_EXTAMP_Select(int bEnable, int mode);
+/*AKITA-5 M8 audio bring up tangshouxing.wt 20190513 begin */
+int Headset_sw_Control(int bEnable);
+int Dbmdx_i2s_Control(int bEnable);
+/*AKITA-5 - end */
 int AudDrv_GPIO_EXTAMP2_Select(int bEnable, int mode);
 int AudDrv_GPIO_RCVSPK_Select(int bEnable);
 int AudDrv_GPIO_HPDEPOP_Select(int bEnable);

@@ -96,6 +96,11 @@ static void _disable_all_charging(struct charger_manager *info)
 	}
 }
 
+static int min_current(int cur1, int cur2)
+{
+	return cur1 < cur2 ? cur1:cur2;
+}
+
 static void swchg_select_charging_current_limit(struct charger_manager *info)
 {
 	struct charger_data *pdata;
@@ -151,6 +156,26 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 			info->data.pe40_single_charger_input_current;
 		pdata->charging_current_limit =
 			info->data.pe40_single_charger_current;
+	} else if (mtk_pdc_check_charger(info) == true) {
+		int vbus = 0, cur = 0, idx = 0;
+
+		mtk_pdc_get_setting(info, &vbus, &cur, &idx);
+		if (idx != -1) {
+			pdata->input_current_limit = cur * 1000;
+			if(pdata->input_current_limit > 2000000)
+				pdata->input_current_limit = 2000000;
+
+			pdata->charging_current_limit = info->data.pd_charger_current;
+			mtk_pdc_setup(info, idx);
+		} else {
+			pdata->input_current_limit =
+				info->data.usb_charger_current_configured;
+			pdata->charging_current_limit =
+				info->data.usb_charger_current_configured;
+		}
+		chr_err("[%s]vbus:%d input_cur:%d idx:%d current:%d\n",
+			__func__, vbus, cur, idx,
+			info->data.pd_charger_current);
 	} else if (is_typec_adapter(info)) {
 		if (tcpm_inquire_typec_remote_rp_curr(info->tcpc) == 3000) {
 			pdata->input_current_limit = 3000000;
@@ -165,27 +190,37 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 			pdata->charging_current_limit = 500000;
 		}
 
+		if (info->chr_type == NONSTANDARD_CHARGER) {
+			pdata->input_current_limit =
+				min_current(info->data.non_std_ac_charger_current, pdata->input_current_limit);
+			pdata->charging_current_limit =
+				min_current(info->data.non_std_ac_charger_current, pdata->charging_current_limit);
+		} else if (info->chr_type == STANDARD_CHARGER) {
+			pdata->input_current_limit =
+				min_current(info->data.ac_charger_input_current, pdata->input_current_limit);
+			pdata->charging_current_limit =
+				min_current(info->data.ac_charger_current, pdata->charging_current_limit);
+			mtk_pe20_set_charging_current(info,
+					&pdata->charging_current_limit,
+					&pdata->input_current_limit);
+			mtk_pe_set_charging_current(info,
+					&pdata->charging_current_limit,
+					&pdata->input_current_limit);
+		} else if (info->chr_type == APPLE_1_0A_CHARGER) {
+			pdata->input_current_limit =
+				min_current(info->data.apple_1_0a_charger_current, pdata->input_current_limit);
+			pdata->charging_current_limit =
+				min_current(info->data.apple_1_0a_charger_current, pdata->charging_current_limit);
+		} else if (info->chr_type == APPLE_2_1A_CHARGER) {
+			pdata->input_current_limit =
+				min_current(info->data.apple_2_1a_charger_current, pdata->input_current_limit);
+			pdata->charging_current_limit =
+				min_current(info->data.apple_2_1a_charger_current, pdata->charging_current_limit);
+		}
+
 		chr_err("type-C:%d current:%d\n",
 			info->pd_type,
 			tcpm_inquire_typec_remote_rp_curr(info->tcpc));
-	} else if (mtk_pdc_check_charger(info) == true) {
-		int vbus = 0, cur = 0, idx = 0;
-
-		mtk_pdc_get_setting(info, &vbus, &cur, &idx);
-		if (idx != -1) {
-		pdata->input_current_limit = cur * 1000;
-		pdata->charging_current_limit = info->data.pd_charger_current;
-			mtk_pdc_setup(info, idx);
-		} else {
-			pdata->input_current_limit =
-				info->data.usb_charger_current_configured;
-			pdata->charging_current_limit =
-				info->data.usb_charger_current_configured;
-		}
-		chr_err("[%s]vbus:%d input_cur:%d idx:%d current:%d\n",
-			__func__, vbus, cur, idx,
-			info->data.pd_charger_current);
-
 	} else if (info->chr_type == STANDARD_HOST) {
 		if (IS_ENABLED(CONFIG_USBIF_COMPLIANCE)) {
 			if (info->usb_state == USB_SUSPEND)
@@ -241,17 +276,26 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 				info->data.apple_2_1a_charger_current;
 		pdata->charging_current_limit =
 				info->data.apple_2_1a_charger_current;
-	}
+	} else if (info->chr_type == POGO_CHARGER) {
+		pr_info("[%s] set Pogo charger current\n", __func__);
+		pr_info("Pogo intpu current: %d\n", info->data.pogo_charger_input_current);
+		pr_info("Pogo charger current limit: %d \n", info->data.pogo_charger_current);
+		pdata->input_current_limit =
+				info->data.pogo_charger_input_current;
+		pdata->charging_current_limit =
+				info->data.pogo_charger_current;
+ 	}
 
+#ifndef CONFIG_MTK_DISABLE_TEMP_PROTECT
 	if (info->enable_sw_jeita) {
 		if (IS_ENABLED(CONFIG_USBIF_COMPLIANCE)
 		    && info->chr_type == STANDARD_HOST)
 			pr_debug("USBIF & STAND_HOST skip current check\n");
-		else {
-			if (info->sw_jeita.sm == TEMP_T0_TO_T1) {
-				pdata->input_current_limit = 500000;
-				pdata->charging_current_limit = 350000;
-			}
+		else if ((info->sw_jeita.cc != 0)&&(info->sw_jeita.cic != 0)
+			&&(info->chr_type == STANDARD_CHARGER||(info->chr_type == POGO_CHARGER))) { 
+			pdata->input_current_limit = info->sw_jeita.cic;
+			pdata->charging_current_limit = info->sw_jeita.cc;
+			goto done;
 		}
 	}
 
@@ -268,6 +312,7 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 			pdata->input_current_limit =
 					pdata->thermal_input_current_limit;
 	}
+#endif
 
 	if (mtk_pe40_get_is_connect(info)) {
 		if (info->pe4.pe4_input_current_limit != -1 &&

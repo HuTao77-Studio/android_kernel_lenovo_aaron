@@ -483,6 +483,9 @@ struct LCM_esd_check_item {
 	unsigned char cmd;
 	unsigned char count;
 	unsigned char para_list[RT_MAX_NUM];
+	unsigned char page_cmd;
+	unsigned char page_count;
+	unsigned char page_para_list[RT_MAX_NUM];
 };
 enum DUAL_DSI_TYPE {
 	DUAL_DSI_NONE = 0x0,
@@ -651,6 +654,13 @@ struct LCM_ROUND_CORNER {
 	void *rb_addr;
 };
 
+struct LCM_BACKLIGHT_CUSTOM{
+	unsigned int max_brightness;
+	unsigned int min_brightness;
+	unsigned int max_bl_lvl;
+	unsigned int min_bl_lvl;
+};
+
 struct LCM_PARAMS {
 	enum LCM_TYPE type;
 	enum LCM_CTRL ctrl;		/* ! how to control LCM registers */
@@ -687,6 +697,16 @@ struct LCM_PARAMS {
 	unsigned int corner_pattern_height;
 	unsigned int corner_pattern_height_bot;
 	struct LCM_ROUND_CORNER round_corner_params;
+	/*bug 337266 - optimize the lcd id read solution, heming.wt, 20180129, begin*/
+	unsigned use_gpioID;
+	unsigned gpioID_value;
+	/*bug 337266 - optimize the lcd id read solution, heming.wt, 20180129, end*/
+	/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, begin*/
+	unsigned int vbias_level;
+	/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, end*/
+
+	unsigned int backlight_cust_count;
+	struct LCM_BACKLIGHT_CUSTOM backlight_cust[6];
 };
 
 
@@ -913,6 +933,10 @@ struct LCM_DRIVER {
 	void (*set_pwm_for_mix)(int enable);
 
 	void (*aod)(int enter);
+/*bug 339631 - add interface for CABC function, heming.wt, 20180203, begin*/
+	void (*set_cabc_cmdq)(void *handle, unsigned int enable);
+	void (*get_cabc_status)(int *status);
+/*bug 339631 - add interface for CABC function, heming.wt, 20180203, end*/
 };
 
 /* LCM Driver Functions */
@@ -927,6 +951,15 @@ extern enum LCM_DSI_MODE_CON lcm_dsi_mode;
 extern int display_bias_enable(void);
 extern int display_bias_disable(void);
 extern int display_bias_regulator_init(void);
+
+extern int lcm_power_disable(void);
+extern int lcm_power_disable_vdd3(void);
+extern int lcm_power_enable(void);
+extern int lcm_power_enable_fhd(void);
+extern int lcm_power_enable_vdd3(void);
+extern void lcm_reset_pin(unsigned int mode);
+extern void ctp_reset_pin(unsigned int mode);
+extern int lcm_backlight_enable(bool enable);
 
 
 

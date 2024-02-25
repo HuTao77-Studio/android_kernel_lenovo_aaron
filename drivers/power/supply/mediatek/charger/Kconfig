@@ -89,6 +89,27 @@ config CHARGER_RT9465
 	  application.
 	  It depends on config MTK_CHARGER.
 
+config CHARGER_RT9471
+        bool "Charger Driver for Richtek RT9471 Charger IC"
+        default n
+        depends on MTK_CHARGER
+        ---help---
+	Richtek RT9471 driver.
+	Say Yes to enable Richtek RT9471 driver
+	It supports both of RT9471/RT9471D,
+	which RT9471D supports BC1.2
+	It depends on config MTK_CHARGER.
+
+config CHARGER_BQ2560X
+	bool "Charger Driver for Richtek BQ2560X Charger IC"
+	default n
+	depends on MTK_CHARGER
+	help
+	  Say Yes to enable Richtek BQ2560X driver.
+	  It is mainly used as slave IC for dual charger
+	  application.
+	  It depends on config MTK_CHARGER.
+
 config MTK_CHARGER_UNLIMITED
 	bool "MediaTek Charger Unlimited"
 	default n
@@ -114,3 +135,9 @@ config MTK_BQ24296_SUPPORT
 	  It depends on config MTK_SMART_BATTERY
 	  and config MTK_SWCHR_SUPPORT
 	  Set to Yes if BQ24296 is used.
+
+config POGO_CHARGER
+	bool "POGO_CHARGER"
+	default y
+	help
+	  This is to enable MediaTek supports to POGO pin charger.

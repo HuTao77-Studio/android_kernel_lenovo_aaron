@@ -625,12 +625,24 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 		status = "okay";
 	};
 
+	lcm: lcm_gpio {
+		compatible = "mediatek,lcm_gpio";
+	};
+
 	touch: touch {
 		compatible = "mediatek,touch";
 	};
 
 	accdet: accdet {
 		compatible = "mediatek,pmic-accdet";
+	};
+
+	dbmdx: dbmdx {
+		compatible = "dspg,dbmdx-codec";
+	};
+
+	dbmdx_soundcard: dbmdx-soundcard {
+		compatible = "dbmdx,dbmdx-soundcard";
 	};
 
 	goodix_fp: fingerprint {
@@ -1604,6 +1616,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <83>;
+		sda-gpio-id = <82>;
+		gpio_start = <0x10002a00>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x50>;
+		rsel_cfg = <0x70>;
 		aed = <0x1a>;
 		mediatek,hs_only;
 	};
@@ -1618,6 +1637,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <84>;
+		sda-gpio-id = <81>;
+		gpio_start = <0x10002a00>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x50>;
+		rsel_cfg = <0x70>;
 		aed = <0x1a>;
 		mediatek,hs_only;
 	};
@@ -1632,6 +1658,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <103>;
+		sda-gpio-id = <104>;
+		gpio_start = <0x10002800>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x60>;
+		rsel_cfg = <0xa0>;
 		aed = <0x1a>;
 		ch_offset_default = <0x100>;
 		ch_offset_ccu = <0x200>;
@@ -1648,6 +1681,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 		<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <50>;
+		sda-gpio-id = <51>;
+		gpio_start = <0x10002600>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x90>;
+		rsel_cfg = <0xb0>;
 		aed = <0x1a>;
 		ch_offset_default = <0x100>;
 		mediatek,hs_only;
@@ -1663,6 +1703,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <105>;
+		sda-gpio-id = <106>;
+		gpio_start = <0x10002800>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x60>;
+		rsel_cfg = <0xa0>;
 		aed = <0x1a>;
 		ch_offset_default = <0x100>;
 		ch_offset_ccu = <0x200>;
@@ -1679,6 +1726,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <48>;
+		sda-gpio-id = <49>;
+		gpio_start = <0x10002600>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x90>;
+		rsel_cfg = <0xb0>;
 		aed = <0x1a>;
 		mediatek,hs_only;
 	};
@@ -1693,6 +1747,13 @@ maxcpus=8 firmware_class.path=/vendor/firmware loop.max_part=7";
 			<&infracfg_ao CLK_IFR_AP_DMA>;
 		clock-names = "main", "dma";
 		clock-div = <5>;
+		scl-gpio-id = <161>;
+		sda-gpio-id = <162>;
+		gpio_start = <0x10002c00>;
+		mem_len = <0x200>;
+		eh_cfg = <0x20>;
+		pu_cfg = <0x50>;
+		rsel_cfg = <0x70>;
 		aed = <0x1a>;
 		ch_offset_default = <0x100>;
 		ch_offset_ccu = <0x200>;
@@ -2342,6 +2403,11 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 			"TOP_ULPOSC1_D2",
 			"TOP_ULPOSC1_D8";
 	};
+
+        swtp: swtp {
+		compatible = "mediatek, swtp-eint";
+	};
+
 	dsi_te: dsi_te {
 		compatible = "mediatek, DSI_TE-eint";
 		status = "disabled";
@@ -2855,6 +2921,13 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 				};
 #endif
 #endif
+				product {
+					compatible = "android,product";
+					dev = "/dev/block/platform/bootdevice/by-name/product";
+					type = "ext4";
+					mnt_flags = "rw,noatime";
+					fsmgr_flags = "wait";
+				};
 			};
 		};
 	};
@@ -2866,39 +2939,46 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 	lk_charger: lk_charger {
 		compatible = "mediatek,lk_charger";
 		enable_anime;
-		enable_pe_plus;
+		/*enable_pe_plus; */
 		power_path_support;
 		max_charger_voltage = <6500000>;
 		fast_charge_voltage = <3000000>;
 
 		/* charging current */
 		usb_charger_current = <500000>;
-		ac_charger_current = <2050000>;
-		ac_charger_input_current = <3200000>;
-		non_std_ac_charger_current = <500000>;
+		ac_charger_current = <2500000>;
+		ac_charger_input_current = <2000000>;
+		non_std_ac_charger_current = <900000>;
 		charging_host_charger_current = <1500000>;
-		ta_ac_charger_current = <3000000>;
+		ta_ac_charger_current = <2000000>;
 		pd_charger_current = <500000>;
 
 		/* battery temperature protection */
 		temp_t4_threshold = <50>;
 		temp_t3_threshold = <45>;
 		temp_t1_threshold = <0>;
+
+		/* lenovo Atika */
+		atika_ac_charger_current = <1500000>;
+		atika_ac_charger_input_current = <1000000>;
+		atika_non_std_ac_charger_current = <900000>;
+		atika_charging_host_charger_current = <1000000>;
 	};
 
 	charger: charger {
 		compatible = "mediatek,charger";
 		algorithm_name = "SwitchCharging";
-		/* enable_sw_jeita; */
-		enable_pe_plus;
-		enable_pe_2;
-		enable_pe_3;
-		enable_pe_4;
-		enable_type_c;
+		enable_sw_jeita;
+		/* enable_pe_plus; */
+		/* enable_pe_2; */
+		/* enable_pe_3; */
+		/* enable_pe_4; */
+		/* enable_type_c; */
+		anna_na_enable_type_c;
 		power_path_support;
 
 		/* common */
-		battery_cv = <4350000>;
+		battery_cv = <4432000>;
 		max_charger_voltage = <6500000>;
 		min_charger_voltage = <4600000>;
 
@@ -2907,29 +2987,73 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 		usb_charger_current_unconfigured = <70000>;
 		usb_charger_current_configured = <500000>;
 		usb_charger_current = <500000>;
-		ac_charger_current = <2050000>;
-		ac_charger_input_current = <3200000>;
-		non_std_ac_charger_current = <500000>;
+		ac_charger_current = <2500000>;
+		ac_charger_input_current = <2000000>;
+		non_std_ac_charger_current = <900000>;
 		charging_host_charger_current = <1500000>;
 		apple_1_0a_charger_current = <650000>;
 		apple_2_1a_charger_current = <800000>;
-		ta_ac_charger_current = <3000000>;
+		ta_ac_charger_current = <2000000>;
+
+		/* pogo charging current */
+		pogo_charger_current = <1500000>;
+		pogo_charger_input_current = <1500000>;
+		
+		/* lenovo Atika */
+		atika_ac_charger_current = <1500000>;
+		atika_ac_charger_input_current = <1000000>;
+		atika_non_std_ac_charger_current = <900000>;
+		atika_charging_host_charger_current = <1000000>;
+
+		/* lenovo Anna NA */
+		anna_na_non_std_ac_charger_current = <500000>;
 
 		/* sw jeita */
-		jeita_temp_above_t4_cv = <4240000>;
-		jeita_temp_t3_to_t4_cv = <4240000>;
-		jeita_temp_t2_to_t3_cv = <4340000>;
-		jeita_temp_t1_to_t2_cv = <4240000>;
-		jeita_temp_t0_to_t1_cv = <4040000>;
-		jeita_temp_below_t0_cv = <4040000>;
+		jeita_temp_above_t4_cc = <0>;
+		jeita_temp_t3_to_t4_cc = <1200000>;
+		jeita_temp_t2_to_t3_cc = <2000000>;
+		jeita_temp_t1_to_t2_cc = <1000000>;
+		jeita_temp_t0_to_t1_cc = <0>;
+		jeita_temp_below_t0_cc = <0>;
+
+		jeita_temp_above_t4_cic = <0>;
+		jeita_temp_t3_to_t4_cic = <1200000>;
+		jeita_temp_t2_to_t3_cic = <2000000>;
+		jeita_temp_t1_to_t2_cic = <1000000>;
+		jeita_temp_t0_to_t1_cic = <0>;
+		jeita_temp_below_t0_cic = <0>;
+
+                anna_na_jeita_temp_t3_to_t4_cc = <1000000>;
+		anna_na_jeita_temp_t3_to_t4_cic = <1000000>;
+
+		atika_jeita_temp_above_t4_cc = <0>;
+		atika_jeita_temp_t3_to_t4_cc = <1000000>;
+		atika_jeita_temp_t2_to_t3_cc = <1000000>;
+		atika_jeita_temp_t1_to_t2_cc = <1000000>;
+		atika_jeita_temp_t0_to_t1_cc = <0>;
+		atika_jeita_temp_below_t0_cc = <0>;
+
+		atika_jeita_temp_above_t4_cic = <0>;
+		atika_jeita_temp_t3_to_t4_cic = <1000000>;
+		atika_jeita_temp_t2_to_t3_cic = <1000000>;
+		atika_jeita_temp_t1_to_t2_cic = <1000000>;
+		atika_jeita_temp_t0_to_t1_cic = <0>;
+		atika_jeita_temp_below_t0_cic = <0>;
+
+		jeita_temp_above_t4_cv = <4208000>;
+		jeita_temp_t3_to_t4_cv = <4208000>;
+		jeita_temp_t2_to_t3_cv = <4432000>;
+		jeita_temp_t1_to_t2_cv = <4432000>;
+		jeita_temp_t0_to_t1_cv = <4432000>;
+		jeita_temp_below_t0_cv = <4432000>;
 		temp_t4_thres = <50>;
-		temp_t4_thres_minus_x_degree = <47>;
+		temp_t4_thres_minus_x_degree = <49>;
 		temp_t3_thres = <45>;
-		temp_t3_thres_minus_x_degree = <39>;
-		temp_t2_thres = <10>;
+		temp_t3_thres_minus_x_degree = <44>;
+		temp_t2_thres = <15>;
 		temp_t2_thres_plus_x_degree = <16>;
 		temp_t1_thres = <0>;
-		temp_t1_thres_plus_x_degree = <6>;
+		temp_t1_thres_plus_x_degree = <1>;
 		temp_t0_thres = <0>;
 		temp_t0_thres_plus_x_degree = <0>;
 		temp_neg_10_thres = <0>;
@@ -2945,9 +3069,9 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 		ta_12v_support;
 		ta_9v_support;
 		pe_ichg_level_threshold = <1000000>; /* uA */
-		ta_ac_12v_input_current = <3200000>;
-		ta_ac_9v_input_current = <3200000>;
-		ta_ac_7v_input_current = <3200000>;
+		ta_ac_12v_input_current = <2000000>;
+		ta_ac_9v_input_current = <2000000>;
+		ta_ac_7v_input_current = <2000000>;
 
 		/* PE 2.0 */
 		pe20_ichg_level_threshold = <1000000>; /* uA */
@@ -2955,11 +3079,11 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 		ta_stop_battery_soc = <85>;
 
 		/* PE 4.0 single charger*/
-		pe40_single_charger_input_current = <3000000>;
-		pe40_single_charger_current = <3000000>;
+		pe40_single_charger_input_current = <2000000>;
+		pe40_single_charger_current = <2000000>;
 
 		/* PE 4.0 dual charger*/
-		pe40_dual_charger_input_current = <3000000>;
+		pe40_dual_charger_input_current = <2000000>;
 		pe40_dual_charger_chg1_current = <2000000>;
 		pe40_dual_charger_chg2_current = <2000000>;
 		pe40_stop_battery_soc = <80>;
@@ -2981,6 +3105,16 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 		bif_threshold1 = <4250000>;
 		bif_threshold2 = <4300000>;
 		bif_cv_under_threshold2 = <4450000>;
+	};
+
+	pogo_charger: pogo_charger {
+		compatible = "mediatek,pogo-charger";
+		pogo,en_gpio = <&pio 177 0>;
+		pogo,otg_gpio = <&pio 169 0>;
+		pogo,wrx_gpio = <&pio 13 0>;
+		pogo,wrx_gpio_na = <&pio 109 0>;
+		pogo,intr_pogo_0 = <&pio 5 0>;
+		pogo,intr_pogo_1 = <&pio 9 0>;
 	};
 
 	rt9465_slave_chr: rt9465_slave_chr {
@@ -3039,6 +3173,10 @@ mipi_rx_ana_csi0b: mipi_rx_ana_csi0b@11c11000 {
 
 	dynamic_options: dynamic_options {
 		compatible = "mediatek,dynamic_options";
+	};
+
+	led_pinctrl: led_pinctrl{
+		compatible = "mediatek,led_pinctrl";		
 	};
 
 };

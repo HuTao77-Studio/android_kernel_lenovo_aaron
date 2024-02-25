@@ -104,6 +104,15 @@ int charger_dev_do_event(struct charger_device *chg_dev, u32 event, u32 args)
 }
 EXPORT_SYMBOL(charger_dev_do_event);
 
+int charger_dev_hz_mode(struct charger_device *chg_dev, bool en)
+{
+	if (chg_dev != NULL && chg_dev->ops != NULL && chg_dev->ops->hz_mode)
+		return chg_dev->ops->hz_mode(chg_dev, en);
+
+	return -ENOTSUPP;
+}
+EXPORT_SYMBOL(charger_dev_hz_mode);
+
 int charger_dev_set_charging_current(struct charger_device *chg_dev, u32 uA)
 {
 	if (chg_dev != NULL && chg_dev->ops != NULL &&

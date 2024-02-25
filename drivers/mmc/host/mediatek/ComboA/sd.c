@@ -74,6 +74,7 @@
 #endif
 
 #include "dbg.h"
+#include <linux/proc_fs.h>
 
 #define CAPACITY_2G             (2 * 1024 * 1024 * 1024ULL)
 
@@ -5018,6 +5019,54 @@ static void msdc_dvfs_kickoff(struct work_struct *work)
 {
 }
 
+
+static int sim_card_status_show(struct seq_file *m, void *v)
+{
+	int gpio_value = 0;
+
+	gpio_value = __gpio_get_value(cd_gpio);
+	if(gpio_value)
+		gpio_value = 0;
+	else
+		gpio_value = 1;
+
+	pr_debug("%s: gpio_value is %d\n", __func__,  gpio_value);
+
+	seq_printf(m, "%d\n", !gpio_value);
+
+	return 0;
+}
+
+static int sim_card_status_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sim_card_status_show, NULL);
+}
+
+static const struct file_operations sim_card_status_fops = {
+	.open		= sim_card_status_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int sim_card_tray_create_proc(void)
+{
+
+	struct proc_dir_entry *status_entry;
+
+	status_entry = proc_create("sd_tray_gpio_value", 0, NULL, &sim_card_status_fops);
+	if (!status_entry){
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void sim_card_tray_remove_proc(void)
+{
+	remove_proc_entry("sd_tray_gpio_value", NULL);
+}
+
 /* use for SPM spm_resource_req */
 unsigned int msdc_cg_lock_init;
 unsigned int msdc_cg_cnt;
@@ -5228,6 +5277,13 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	msdc_hie_register(host);
 #endif
 
+	if (host->hw->host_function == MSDC_SD) {
+		if(sim_card_tray_create_proc()) {
+			dev_err(&pdev->dev, "creat proc sim_card_status failed\n");
+		} else {
+			dev_dbg(&pdev->dev, "creat proc sim_card_status successed\n");
+		}
+	}
 	return 0;
 
 release:
@@ -5272,6 +5328,9 @@ static int msdc_drv_remove(struct platform_device *pdev)
 	if (mem)
 		release_mem_region(mem->start, mem->end - mem->start + 1);
 
+	if(host->hw->host_function == MSDC_SD){
+		sim_card_tray_remove_proc();
+	}
 	msdc_remove_host(host);
 
 	return 0;

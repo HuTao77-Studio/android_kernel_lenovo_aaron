@@ -110,6 +110,10 @@ static int battery_in_data[1] = { 0 };
 static int battery_out_data[1] = { 0 };
 static bool g_ADC_Cali;
 
+extern int batt_slate_mode_control(struct charger_consumer *consumer, bool en);
+extern int batt_charging_enable(struct charger_consumer *consumer, bool en);
+extern int batt_supply_enable(struct charger_consumer *consumer, bool en);
+
 static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
@@ -395,7 +399,6 @@ static int battery_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TEMP:
 		val->intval = data->BAT_batt_temp * 10;
 		break;
-
 	default:
 		ret = -EINVAL;
 		break;
@@ -446,7 +449,10 @@ void battery_update(struct battery_data *bat_data)
 #if defined(CONFIG_MTK_DISABLE_GAUGE)
 	return;
 #endif
-
+	if((bat_data->BAT_CAPACITY == 100) && (upmu_get_rgs_chrdet() != 0)
+		&& (bat_data->BAT_STATUS != POWER_SUPPLY_STATUS_DISCHARGING)) {
+		bat_data->BAT_STATUS = POWER_SUPPLY_STATUS_FULL;
+	}
 	if (is_fg_disabled())
 		bat_data->BAT_CAPACITY = 50;
 
@@ -935,15 +941,15 @@ unsigned int TempConverBattThermistor(int temp)
 	int i;
 	unsigned int TBatt_R_Value = 0xffff;
 
-	if (temp >= Fg_Temperature_Table[20].BatteryTemp) {
-		TBatt_R_Value = Fg_Temperature_Table[20].TemperatureR;
+	if (temp >= Fg_Temperature_Table[22].BatteryTemp) {
+		TBatt_R_Value = Fg_Temperature_Table[22].TemperatureR;
 	} else if (temp <= Fg_Temperature_Table[0].BatteryTemp) {
 		TBatt_R_Value = Fg_Temperature_Table[0].TemperatureR;
 	} else {
 		RES1 = Fg_Temperature_Table[0].TemperatureR;
 		TMP1 = Fg_Temperature_Table[0].BatteryTemp;
 
-		for (i = 0; i <= 20; i++) {
+		for (i = 0; i <= 22; i++) {
 			if (temp <= Fg_Temperature_Table[i].BatteryTemp) {
 				RES2 = Fg_Temperature_Table[i].TemperatureR;
 				TMP2 = Fg_Temperature_Table[i].BatteryTemp;
@@ -976,13 +982,13 @@ int BattThermistorConverTemp(int Res)
 
 	if (Res >= Fg_Temperature_Table[0].TemperatureR) {
 		TBatt_Value = -40;
-	} else if (Res <= Fg_Temperature_Table[20].TemperatureR) {
-		TBatt_Value = 60;
+	} else if (Res <= Fg_Temperature_Table[22].TemperatureR) {
+		TBatt_Value = 70;
 	} else {
 		RES1 = Fg_Temperature_Table[0].TemperatureR;
 		TMP1 = Fg_Temperature_Table[0].BatteryTemp;
 
-		for (i = 0; i <= 20; i++) {
+		for (i = 0; i <= 22; i++) {
 			if (Res >= Fg_Temperature_Table[i].TemperatureR) {
 				RES2 = Fg_Temperature_Table[i].TemperatureR;
 				TMP2 = Fg_Temperature_Table[i].BatteryTemp;
@@ -1278,6 +1284,13 @@ int force_get_tbat(bool update)
 		return 25;
 	}
 
+//+ExtB AKITA-8 modify guojunbo.wt 20190527 disable battery temperature protect
+#ifdef CONFIG_MTK_DISABLE_TEMP_PROTECT
+        bm_debug("CONFIG_MTK_DISABLE_TEMP_PROTECT\n");
+        return 25;
+#endif
+//-ExtB AKITA-8 modify guojunbo.wt 20190527 disable battery temperature protect
+
 #if defined(FIXED_TBAT_25)
 	bm_debug("[%s] fixed TBAT=25 t\n",
 	__func__);
@@ -1418,7 +1431,19 @@ static void nl_data_handler(struct sk_buff *skb)
 
 	size = fgd_msg->fgd_ret_data_len + FGD_NL_MSG_T_HDR_LEN;
 
-	fgd_ret_msg = vmalloc(size);
+	if (size > (PAGE_SIZE << 1))
+		fgd_ret_msg = vmalloc(size);
+	else
+		fgd_ret_msg = kmalloc(size, GFP_KERNEL);
+
+	if (fgd_ret_msg == NULL) {
+		if (size > PAGE_SIZE)
+			fgd_ret_msg = vmalloc(size);
+
+		if (fgd_ret_msg == NULL)
+			return;
+	}
+
 	if (!fgd_ret_msg)
 		return;
 
@@ -1427,7 +1452,7 @@ static void nl_data_handler(struct sk_buff *skb)
 	bmd_ctrl_cmd_from_user(data, fgd_ret_msg);
 	nl_send_to_user(pid, seq, fgd_ret_msg);
 
-	vfree(fgd_ret_msg);
+	kvfree(fgd_ret_msg);
 }
 
 int wakeup_fg_algo(unsigned int flow_state)
@@ -1450,7 +1475,19 @@ int wakeup_fg_algo(unsigned int flow_state)
 		struct fgd_nl_msg_t *fgd_msg;
 		int size = FGD_NL_MSG_T_HDR_LEN + sizeof(flow_state);
 
-		fgd_msg = vmalloc(size);
+		if (size > (PAGE_SIZE << 1))
+			fgd_msg = vmalloc(size);
+		else
+			fgd_msg = kmalloc(size, GFP_KERNEL);
+
+		if (fgd_msg == NULL) {
+			if (size > PAGE_SIZE)
+				fgd_msg = vmalloc(size);
+
+			if (fgd_msg == NULL)
+				return -1;
+		}
+
 		if (!fgd_msg) {
 /* bm_err("Error: wakeup_fg_algo() vmalloc fail!!!\n"); */
 			return -1;
@@ -1464,7 +1501,9 @@ int wakeup_fg_algo(unsigned int flow_state)
 		memcpy(fgd_msg->fgd_data, &flow_state, sizeof(flow_state));
 		fgd_msg->fgd_data_len += sizeof(flow_state);
 		nl_send_to_user(gm.g_fgd_pid, 0, fgd_msg);
-		vfree(fgd_msg);
+
+		kvfree(fgd_msg);
+
 		return 0;
 	} else {
 		return -1;
@@ -1491,7 +1530,19 @@ int wakeup_fg_algo_cmd(unsigned int flow_state, int cmd, int para1)
 		struct fgd_nl_msg_t *fgd_msg;
 		int size = FGD_NL_MSG_T_HDR_LEN + sizeof(flow_state);
 
-		fgd_msg = vmalloc(size);
+		if (size > (PAGE_SIZE << 1))
+			fgd_msg = vmalloc(size);
+		else
+			fgd_msg = kmalloc(size, GFP_KERNEL);
+
+		if (fgd_msg == NULL) {
+			if (size > PAGE_SIZE)
+				fgd_msg = vmalloc(size);
+
+			if (fgd_msg == NULL)
+				return -1;
+		}
+
 		if (!fgd_msg) {
 /* bm_err("Error: wakeup_fg_algo() vmalloc fail!!!\n"); */
 			return -1;
@@ -1507,7 +1558,9 @@ int wakeup_fg_algo_cmd(unsigned int flow_state, int cmd, int para1)
 		memcpy(fgd_msg->fgd_data, &flow_state, sizeof(flow_state));
 		fgd_msg->fgd_data_len += sizeof(flow_state);
 		nl_send_to_user(gm.g_fgd_pid, 0, fgd_msg);
-		vfree(fgd_msg);
+
+		kvfree(fgd_msg);
+
 		return 0;
 	} else {
 		return -1;
@@ -3401,6 +3454,62 @@ static const struct file_operations adc_cali_fops = {
 	.release = adc_cali_release,
 };
 
+static ssize_t show_StopCharging_Test(struct device *dev,struct device_attribute *attr, char *buf)
+{
+	if (gm.pbat_consumer != NULL){
+		batt_slate_mode_control(gm.pbat_consumer,1);
+	}
+	return sprintf(buf, "chr=0\n");
+}
+
+static ssize_t store_StopCharging_Test(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+    return -1;
+}
+static DEVICE_ATTR(StopCharging_Test, 0664, show_StopCharging_Test, store_StopCharging_Test);
+
+static ssize_t show_StartCharging_Test(struct device *dev,struct device_attribute *attr, char *buf)
+{
+	if (gm.pbat_consumer != NULL){
+		batt_slate_mode_control(gm.pbat_consumer,0);
+	}
+	return sprintf(buf, "chr=1\n");
+}
+static ssize_t store_StartCharging_Test(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+    return -1;
+}
+static DEVICE_ATTR(StartCharging_Test, 0664, show_StartCharging_Test, store_StartCharging_Test);
+
+static ssize_t show_supply_enable(struct device *dev,struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "NA\n");
+}
+
+static ssize_t store_supply_enable(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	bool value;
+	int ret;
+
+	ret = strtobool(buf, &value);
+	batt_supply_enable(gm.pbat_consumer,value);
+	return size;
+}
+static DEVICE_ATTR(supply_enable, 0664, show_supply_enable, store_supply_enable);
+
+static ssize_t show_charging_enable(struct device *dev,struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "NA\n");
+}
+static ssize_t store_charging_enable(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	bool value;
+	int ret;
+	ret = strtobool(buf, &value);
+	batt_charging_enable(gm.pbat_consumer,value);
+	return size;
+}
+static DEVICE_ATTR(charging_enable, 0664, show_charging_enable, store_charging_enable);
 
 /*************************************/
 static struct wakeup_source battery_lock;
@@ -3561,6 +3670,13 @@ static int __init battery_probe(struct platform_device *dev)
 		gm.bat_nb.notifier_call = battery_callback;
 		register_charger_manager_notifier(gm.pbat_consumer, &gm.bat_nb);
 	}
+
+#if !defined(CONFIG_MTK_DISABLE_GAUGE)
+	ret = device_create_file(&battery_main.psy->dev, &dev_attr_charging_enable);
+	ret = device_create_file(&battery_main.psy->dev, &dev_attr_supply_enable);
+	ret = device_create_file(&battery_main.psy->dev, &dev_attr_StopCharging_Test);
+	ret = device_create_file(&battery_main.psy->dev, &dev_attr_StartCharging_Test);
+#endif 
 
 	battery_debug_init();
 

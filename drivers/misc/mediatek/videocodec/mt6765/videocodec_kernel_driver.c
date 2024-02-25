@@ -227,7 +227,6 @@ void *KVA_VDEC_MISC_BASE, *KVA_VDEC_VLD_BASE;
 void *KVA_VDEC_BASE, *KVA_VDEC_GCON_BASE, *KVA_MBIST_BASE;
 unsigned int VENC_IRQ_ID, VDEC_IRQ_ID;
 
-/* #define KS_POWER_WORKAROUND */
 
 /* extern unsigned long pmem_user_v2p_video(unsigned long va); */
 
@@ -443,16 +442,15 @@ void vdec_power_off(void)
 {
 
 	mutex_lock(&VdecPWRLock);
-	/* cervino VCODEC_SEL reset */
-	do {
-		VDO_HW_WRITE(KVA_VDEC_GCON_BASE + 0x20, 0);
-	} while (VDO_HW_READ(KVA_VDEC_GCON_BASE + 0x20) != 0);
-
 	if (gu4VdecPWRCounter == 0) {
 		pr_debug("[VCODEC] gu4VdecPWRCounter = 0\n");
 	} else {
-
 		vdec_polling_status();
+		/* VCODEC_SEL reset */
+		do {
+			VDO_HW_WRITE(KVA_VDEC_GCON_BASE + 0x20, 0);
+		} while (VDO_HW_READ(KVA_VDEC_GCON_BASE + 0x20) != 0);
+
 		gu4VdecPWRCounter--;
 
 		clk_disable_unprepare(clk_MT_CG_VDEC);
@@ -1072,9 +1070,6 @@ static long vcodec_lockhw_vdec(struct VAL_HW_LOCK_T *pHWLock, char *bLockedHW)
 #ifdef CONFIG_PM
 				pm_runtime_put_sync(vcodec_device);
 #else
-#ifndef KS_POWER_WORKAROUND
-				vdec_power_off();
-#endif
 #endif
 				disable_irq(VDEC_IRQ_ID);
 			}
@@ -1115,9 +1110,6 @@ static long vcodec_lockhw_vdec(struct VAL_HW_LOCK_T *pHWLock, char *bLockedHW)
 #ifdef CONFIG_PM
 			pm_runtime_get_sync(vcodec_device);
 #else
-#ifndef KS_POWER_WORKAROUND
-			vdec_power_on();
-#endif
 #endif
 			if (pHWLock->bSecureInst == VAL_FALSE) {
 				/* Add one line comment for avoid kernel coding
@@ -1341,9 +1333,6 @@ static long vcodec_lockhw_venc(struct VAL_HW_LOCK_T *pHWLock, char *bLockedHW)
 #ifdef CONFIG_PM
 			pm_runtime_get_sync(vcodec_device2);
 #else
-#ifndef KS_POWER_WORKAROUND
-			venc_power_on();
-#endif
 #endif
 			enable_irq(VENC_IRQ_ID);
 		} else { /* someone use HW, and check timeout value */
@@ -1590,9 +1579,6 @@ static long vcodec_unlockhw(unsigned long arg)
 #ifdef CONFIG_PM
 			pm_runtime_put_sync(vcodec_device);
 #else
-#ifndef KS_POWER_WORKAROUND
-			vdec_power_off();
-#endif
 #endif
 			CodecHWLock.pvHandle = 0;
 			CodecHWLock.eDriverType = VAL_DRIVER_TYPE_NONE;
@@ -1641,9 +1627,6 @@ static long vcodec_unlockhw(unsigned long arg)
 #ifdef CONFIG_PM
 			pm_runtime_put_sync(vcodec_device2);
 #else
-#ifndef KS_POWER_WORKAROUND
-			venc_power_off();
-#endif
 #endif
 			CodecHWLock.pvHandle = 0;
 			CodecHWLock.eDriverType = VAL_DRIVER_TYPE_NONE;
@@ -3229,10 +3212,6 @@ static int vcodec_probe(struct platform_device *dev)
 
 	pr_debug("vcodec_probe Done\n");
 
-#ifdef KS_POWER_WORKAROUND
-	vdec_power_on();
-	venc_power_on();
-#endif
 	pm_qos_add_request(&vcodec_qos_request, PM_QOS_MM_MEMORY_BANDWIDTH,
 						PM_QOS_DEFAULT_VALUE);
 	pm_qos_add_request(&vcodec_qos_request2, PM_QOS_MM_MEMORY_BANDWIDTH,

@@ -1122,6 +1122,28 @@ struct LCM_DRIVER *lcm_driver_list[] = {
 #if defined(HX83112B_FHDP_DSI_CMD_AUO_RT5081)
 	&hx83112b_fhdp_dsi_cmd_auo_rt5081_lcm_drv,
 #endif
+
+#if defined(FT8201_WXGA_VDO_INCELL_BOE)
+	&ft8201_wxga_vdo_incell_boe_lcm_drv,
+#endif
+
+#if defined(FT8201_WXGA_VDO_INCELL_INX)
+	&ft8201_wxga_vdo_incell_inx_lcm_drv,
+#endif
+
+#if defined(HX8279D_WUXGA_VDO_ONCELL_BOE)
+	&hx8279d_wuxga_vdo_oncell_boe_lcm_drv,
+#endif
+
+#if defined(NT51021B_WUXGA_VDO_ONCELL_AUO)
+	&nt51021b_wuxga_vdo_oncell_auo_lcm_drv,
+#endif
+
+/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, begin*/
+#if defined(VIRTUAL_DSI_VDO_DEFAULT)
+	 &virtual_dsi_vdo_default,
+#endif
+/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, end*/
 };
 
 unsigned char lcm_name_list[][128] = {
@@ -1204,6 +1226,7 @@ LCM_COMPILE_ASSERT(sizeof(lcm_driver_list) / sizeof(struct LCM_DRIVER *) != 0);
 	defined(NT35521_HD720_DSI_VDO_BOE) | \
 	defined(NT35521_HD720_DSI_VIDEO_TM)
 static unsigned char lcd_id_pins_value = 0xFF;
+static unsigned char lcd_id_pins_value_compact = 0xFF;
 
 /*
  * Function:    which_lcd_module_triple

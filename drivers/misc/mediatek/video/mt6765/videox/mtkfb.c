@@ -314,9 +314,18 @@ static int mtkfb1_blank(int blank_mode, struct fb_info *info)
 }
 #endif
 
+// wanghui26 added for FHD-AUO panel, sometimes show blur screen.
+#if defined(FHD_AUO_LOCK)
+static DEFINE_MUTEX(fhd_auo_disp_suspend_lock);
+#endif
+
 static int mtkfb_blank(int blank_mode, struct fb_info *info)
 {
 	enum mtkfb_power_mode prev_pm = primary_display_get_power_mode();
+
+#if defined(FHD_AUO_LOCK)
+	mutex_lock(&fhd_auo_disp_suspend_lock);
+#endif
 
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
@@ -351,8 +360,15 @@ static int mtkfb_blank(int blank_mode, struct fb_info *info)
 
 		break;
 	default:
+#if defined(FHD_AUO_LOCK)
+		mutex_unlock(&fhd_auo_disp_suspend_lock);
+#endif
 		return -EINVAL;
 	}
+
+#if defined(FHD_AUO_LOCK)
+	mutex_unlock(&fhd_auo_disp_suspend_lock);
+#endif
 
 	return 0;
 }

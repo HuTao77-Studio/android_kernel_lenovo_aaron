@@ -49,6 +49,13 @@
 #include "mtk_charger_intf.h"
 
 
+#ifdef CONFIG_TCPC_CLASS
+static struct notifier_block pd_nb;
+static struct tcpc_device *tcpc_dev;
+static int tcpc_polarity = 0;
+static struct delayed_work tcpc_polarity_work;
+#endif
+
 void __attribute__((weak)) fg_charger_in_handler(void)
 {
 	pr_notice("%s not defined\n", __func__);
@@ -56,6 +63,9 @@ void __attribute__((weak)) fg_charger_in_handler(void)
 
 static enum charger_type g_chr_type;
 static bool ignore_usb;
+#ifdef CONFIG_TCPC_CLASS
+extern bool ignore_usb_check;
+#endif
 
 #ifdef CONFIG_FPGA_EARLY_PORTING
 /*  FPGA */
@@ -77,6 +87,7 @@ static const char * const mtk_chg_type_name[] = {
 	"Apple 1.0A Charger",
 	"Apple 0.5A Charger",
 	"Wireless Charger",
+	"Pogo Charger",
 };
 
 static void dump_charger_name(enum charger_type type)
@@ -90,6 +101,7 @@ static void dump_charger_name(enum charger_type type)
 	case APPLE_2_1A_CHARGER:
 	case APPLE_1_0A_CHARGER:
 	case APPLE_0_5A_CHARGER:
+	case POGO_CHARGER:
 		pr_info("%s: charger type: %d, %s\n", __func__, type,
 			mtk_chg_type_name[type]);
 		break;
@@ -116,6 +128,71 @@ struct mt_charger {
 	enum charger_type chg_type;
 };
 
+#ifdef CONFIG_TCPC_CLASS
+static int pd_tcp_notifier_call(struct notifier_block *nb,
+							unsigned long event, void *data)
+{
+	struct tcp_notify *noti = data;
+
+	switch (event) {
+		case TCP_NOTIFY_TYPEC_STATE:
+			if (noti->typec_state.old_state == TYPEC_UNATTACHED &&
+					(noti->typec_state.new_state == TYPEC_ATTACHED_SNK ||
+				noti->typec_state.new_state == TYPEC_ATTACHED_CUSTOM_SRC ||
+				noti->typec_state.new_state == TYPEC_ATTACHED_NORP_SRC)) {
+					pr_info("%s USB Plug in, pol = %d\n", __func__,
+						noti->typec_state.polarity);
+					tcpc_polarity = noti->typec_state.polarity ? 2 : 1;
+			} else if ((noti->typec_state.old_state == TYPEC_ATTACHED_SNK ||
+				noti->typec_state.old_state == TYPEC_ATTACHED_CUSTOM_SRC ||
+			    noti->typec_state.old_state == TYPEC_ATTACHED_NORP_SRC)
+				&& noti->typec_state.new_state == TYPEC_UNATTACHED) {
+					pr_info("%s USB Plug out\n", __func__);
+					tcpc_polarity = 0;
+		 	}
+			break;
+		default:
+			break;
+		}
+	return NOTIFY_OK;
+}
+
+static ssize_t show_tcpc_polarity(struct device *dev, struct device_attribute *attr,
+							       char *buf)
+{
+	return sprintf(buf, "%d\n", tcpc_polarity);
+}
+
+static DEVICE_ATTR(typec_cc_orientation, 0444, show_tcpc_polarity, NULL);
+
+static void do_tcpc_polarity_work(struct work_struct *data)
+{
+	static int ret;
+	struct power_supply *usb_psy;
+				
+	if(!tcpc_dev)
+		tcpc_dev = tcpc_dev_get_by_name("type_c_port0");
+
+	if (!tcpc_dev) {
+		pr_err("%s get tcpc device type_c_port0 fail\n", __func__);
+			schedule_delayed_work(&tcpc_polarity_work, msecs_to_jiffies(500));
+		return;
+	} 
+
+	pd_nb.notifier_call = pd_tcp_notifier_call;
+	ret = register_tcp_dev_notifier(tcpc_dev, &pd_nb, TCP_NOTIFY_TYPE_ALL);
+	if (ret < 0) {
+		pr_err("%s: register tcpc notifer fail\n", __func__);
+		return ;
+	}
+
+	usb_psy = power_supply_get_by_name("usb");
+	ret = device_create_file(&(usb_psy->dev), &dev_attr_typec_cc_orientation);
+
+	pr_err("%s OK",__func__);
+}
+#endif
+
 static int mt_charger_online(struct mt_charger *mtk_chg)
 {
 	int ret = 0;
@@ -128,7 +205,8 @@ static int mt_charger_online(struct mt_charger *mtk_chg)
 		if (boot_mode == KERNEL_POWER_OFF_CHARGING_BOOT ||
 		    boot_mode == LOW_POWER_OFF_CHARGING_BOOT) {
 			pr_notice("%s: Unplug Charger/USB\n", __func__);
-			kernel_power_off();
+			//msleep(3000);
+			//kernel_power_off();
 		}
 	}
 #endif /* !CONFIG_TCPC_CLASS */
@@ -334,6 +412,11 @@ static int mt_charger_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mt_chg);
 	device_init_wakeup(&pdev->dev, 1);
 
+#ifdef CONFIG_TCPC_CLASS
+	INIT_DELAYED_WORK(&tcpc_polarity_work, do_tcpc_polarity_work);
+	schedule_delayed_work(&tcpc_polarity_work, 0);
+#endif
+
 	pr_info("%s\n", __func__);
 	return 0;
 
@@ -420,6 +503,9 @@ enum charger_type mt_get_charger_type(void)
 void charger_ignore_usb(bool ignore)
 {
 	ignore_usb = ignore;
+#ifdef CONFIG_TCPC_CLASS
+	ignore_usb_check = ignore;
+#endif
 }
 
 static s32 __init mt_charger_det_init(void)

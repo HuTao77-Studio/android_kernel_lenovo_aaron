@@ -24,8 +24,9 @@
 #include "hi556mipiraw_Sensor.h"
 
 #define PFX "hi556_camera_sensor"
-#define LOG_INF(format, args...)    \
-	pr_debug(PFX "[%s] " format, __func__, ##args)
+#define LOG_DBG(format, args...)    pr_debug(PFX "[%s] " format, __FUNCTION__, ##args)
+#define LOG_INF(format, args...)    pr_info(PFX "[%s] " format, __FUNCTION__, ##args)
+#define LOG_ERR(format, args...)    pr_err(PFX "[%s] " format, __FUNCTION__, ##args)
 
 #define MULTI_WRITE 1
 static DEFINE_SPINLOCK(imgsensor_drv_lock);
@@ -142,15 +143,15 @@ static struct imgsensor_info_struct imgsensor_info = {
 	.sensor_interface_type = SENSOR_INTERFACE_TYPE_MIPI,
 	.mipi_sensor_type = MIPI_OPHY_NCSI2,
 	.mipi_settle_delay_mode = 1,
-	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_Gb,
+	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_Gr,
 	.mclk = 24,
 	.mipi_lane_num = SENSOR_MIPI_2_LANE,
-	.i2c_addr_table = {0x51, 0x50, 0x40, 0xff},
+	.i2c_addr_table = {0x40, 0xff},
 	.i2c_speed = 400,
 };
 
 static struct imgsensor_struct imgsensor = {
-	.mirror = IMAGE_NORMAL,
+	.mirror = IMAGE_V_MIRROR,
 	.sensor_mode = IMGSENSOR_MODE_INIT,
 	.shutter = 0x0100,
 	.gain = 0xe0,
@@ -247,6 +248,298 @@ static void write_cmos_sensor_8(kal_uint32 addr, kal_uint32 para)
 		(char)(addr & 0xFF), (char)(para & 0xFF)};
 
 	iWriteRegI2C(pu_send_cmd, 3, imgsensor.i2c_write_id);
+}
+
+#define LSC_DATA_SIZE 1868
+#define AWB_DATA_SIZE 16
+#define MODULE_INFO_SIZE 7
+#define AF_DATA_SIZE 5
+unsigned char hi556_data_af[AF_DATA_SIZE + 1] = {0};/*Add check sum*/
+unsigned char hi556_data_lsc[LSC_DATA_SIZE + 1] = {0};/*Add check sum*/
+unsigned char hi556_data_awb[AWB_DATA_SIZE + 1] = {0};/*Add check sum*/
+unsigned char hi556_data_info[MODULE_INFO_SIZE + 1] = {0};/*Add check sum*/
+unsigned char hi556_module_id = 0;
+unsigned char hi556_lsc_valid = 0;
+unsigned char hi556_awb_valid = 0;
+unsigned char hi556_af_valid = 0;
+
+static void hi556_disable_otp_func(void)
+{
+    write_cmos_sensor(0x0a00, 0x00);
+    mdelay(10);
+    write_cmos_sensor(0x003e, 0x00);
+    write_cmos_sensor(0x0a00, 0x00);
+}
+static int read_hi556_module_info(void){
+  int otp_grp_flag = 0, minfo_start_addr = 0;
+  int year = 0, month = 0, day = 0;
+  int position = 0,lens_id = 0,vcm_id = 0;
+  int check_sum = 0, check_sum_cal = 0;
+  int i;
+  /* read flag */
+  write_cmos_sensor_8(0x010a,((0x0401)>>8)&0xff);
+  write_cmos_sensor_8(0x010b,(0x0401)&0xff);
+  write_cmos_sensor_8(0x0102,0x01);
+  otp_grp_flag = read_cmos_sensor(0x0108);
+  LOG_INF("otp_grp_flag = 0x%x\n",otp_grp_flag);
+  if(otp_grp_flag == 0x01)
+    minfo_start_addr = 0x0402;
+  else if (otp_grp_flag == 0x13)
+    minfo_start_addr = 0x040a;
+  else if(otp_grp_flag == 0x37)
+    minfo_start_addr = 0x0412;
+  else{
+    LOG_INF("no OTP hi556_data_info\n");
+    return 0;
+  }
+  if(minfo_start_addr != 0){
+    write_cmos_sensor_8(0x010a,((minfo_start_addr)>>8)&0xff);
+    write_cmos_sensor_8(0x010b,(minfo_start_addr)&0xff);
+    write_cmos_sensor_8(0x0102,0x01);
+    for(i = 0; i < MODULE_INFO_SIZE + 1; i++){
+      hi556_data_info[i]=read_cmos_sensor(0x0108);
+    }
+    for(i = 0; i < MODULE_INFO_SIZE; i++){
+      check_sum_cal += hi556_data_info[i];
+    }
+
+    check_sum_cal = (check_sum_cal % 255) + 1;
+    hi556_module_id = hi556_data_info[0];
+    position = hi556_data_info[1];
+    lens_id = hi556_data_info[2];
+    vcm_id = hi556_data_info[3];
+    year = hi556_data_info[4];
+    month = hi556_data_info[5];
+    day = hi556_data_info[6];
+    check_sum = hi556_data_info[MODULE_INFO_SIZE];
+  }
+  //LOG_INF("module_id=0x%x position=0x%x\n", hi556_module_id, position);
+  LOG_INF("=== HI556 INFO module_id=0x%x position=0x%x ===\n", hi556_module_id, position);
+  LOG_INF("=== HI556 INFO lens_id=0x%x,vcm_id=0x%x ===\n",lens_id, vcm_id);
+  LOG_INF("=== HI556 INFO date is %d-%d-%d ===\n",year,month,day);
+  LOG_INF("=== HI556 INFO check_sum=0x%x,check_sum_cal=0x%x ===\n", check_sum, check_sum_cal);
+  if(check_sum == check_sum_cal){
+		return 1;
+	}else{
+		return 0;
+	}
+}
+
+static int read_hi556_awb_info(void){
+  int otp_grp_flag = 0, awb_start_addr=0;
+  int check_sum_awb = 0, check_sum_awb_cal = 0;
+  int r ,b ,gr, gb, golden_r, golden_b, golden_gr, golden_gb;
+  int i;
+  /* awb group 1 */
+  write_cmos_sensor_8(0x010a,((0x041a)>>8)&0xff);
+  write_cmos_sensor_8(0x010b,(0x041a)&0xff);
+  write_cmos_sensor_8(0x0102,0x01);
+  otp_grp_flag = read_cmos_sensor(0x0108);
+  LOG_INF("otp_grp_flag = 0x%x\n",otp_grp_flag);
+  if(otp_grp_flag == 0x01)
+    awb_start_addr = 0x041b;
+  else if (otp_grp_flag == 0x13)
+    awb_start_addr = 0x042c;
+  else if(otp_grp_flag == 0x37)
+    awb_start_addr = 0x043d;
+  else{
+    LOG_INF("no AWB OTP data return \n");
+    return 0;
+  }
+
+  if(awb_start_addr != 0)
+  {
+    write_cmos_sensor_8(0x010a,((awb_start_addr)>>8)&0xff);
+    write_cmos_sensor_8(0x010b,(awb_start_addr)&0xff);
+    write_cmos_sensor_8(0x0102,0x01);
+    for(i = 0; i < AWB_DATA_SIZE + 1; i++){
+      hi556_data_awb[i]=read_cmos_sensor(0x0108);
+    }
+    for(i = 0; i < AWB_DATA_SIZE; i++){
+      check_sum_awb_cal += hi556_data_awb[i];
+    }
+    LOG_INF("check_sum_awb_cal =0x%x \n",check_sum_awb_cal);
+    r = ((hi556_data_awb[1]<<8)&0xff00)|(hi556_data_awb[0]&0xff);
+    b = ((hi556_data_awb[3]<<8)&0xff00)|(hi556_data_awb[2]&0xff);
+    gr = ((hi556_data_awb[5]<<8)&0xff00)|(hi556_data_awb[4]&0xff);
+    gb = ((hi556_data_awb[7]<<8)&0xff00)|(hi556_data_awb[6]&0xff);
+    golden_r = ((hi556_data_awb[9]<<8)&0xff00)|(hi556_data_awb[8]&0xff);
+    golden_b = ((hi556_data_awb[11]<<8)&0xff00)|(hi556_data_awb[10]&0xff);
+    golden_gr = ((hi556_data_awb[13]<<8)&0xff00)|(hi556_data_awb[12]&0xff);
+    golden_gb = ((hi556_data_awb[15]<<8)&0xff00)|(hi556_data_awb[14]&0xff);
+    check_sum_awb = hi556_data_awb[AWB_DATA_SIZE];
+    check_sum_awb_cal = (check_sum_awb_cal % 255) + 1;
+  }
+  LOG_INF("=== HI556 AWB r=0x%x, b=0x%x, gr=%x, gb=0x%x ===\n", r, b,gb, gr);
+  LOG_INF("=== HI556 AWB gr=0x%x,gb=0x%x,gGr=%x, gGb=0x%x ===\n", golden_r, golden_b, golden_gr, golden_gb);
+  LOG_INF("=== HI556 AWB check_sum_awb=0x%x,check_sum_awb_cal=0x%x ===\n",check_sum_awb,check_sum_awb_cal);
+  if(check_sum_awb == check_sum_awb_cal){
+				return 1;
+  }else{
+				return 0;
+  }
+}
+
+static int read_hi556_lsc_info(void){
+  int otp_grp_flag = 0, lsc_start_addr = 0;
+  int check_sum_lsc = 0, check_sum_lsc_cal = 0;
+  int i;
+  /* lsc group 1 */
+  write_cmos_sensor_8(0x010a,((0x044e)>>8)&0xff);
+  write_cmos_sensor_8(0x010b,(0x044e)&0xff);
+  write_cmos_sensor_8(0x0102,0x01);
+  otp_grp_flag = read_cmos_sensor(0x0108);
+  LOG_INF("otp_grp_flag = 0x%x\n",otp_grp_flag);
+  if(otp_grp_flag == 0x01)
+    lsc_start_addr = 0x044f;
+  else if (otp_grp_flag == 0x13)
+    lsc_start_addr = 0x0b9c;
+  else if(otp_grp_flag == 0x37)
+    lsc_start_addr = 0x12e9;
+  else{
+    LOG_INF("no LSC OTP data return \n");
+    return 0;
+  }
+
+  if(lsc_start_addr != 0){
+    write_cmos_sensor_8(0x010a,((lsc_start_addr)>>8)&0xff);
+    write_cmos_sensor_8(0x010b,(lsc_start_addr)&0xff);
+    write_cmos_sensor_8(0x0102,0x01);
+    for(i = 0; i < LSC_DATA_SIZE + 1; i++)
+    {
+      hi556_data_lsc[i] = read_cmos_sensor(0x0108);
+    }
+    for(i = 0; i < LSC_DATA_SIZE; i++){
+      check_sum_lsc_cal += hi556_data_lsc[i];
+    }
+    LOG_INF("check_sum_awb_cal =0x%x \n",check_sum_lsc_cal);
+    check_sum_lsc = hi556_data_lsc[LSC_DATA_SIZE];
+    check_sum_lsc_cal = (check_sum_lsc_cal % 255) + 1;
+  }
+  LOG_INF("=== HI556 LSC check_sum_awb=0x%x, check_sum_awb_cal=0x%x ===\n", check_sum_lsc, check_sum_lsc_cal);
+  if(check_sum_lsc == check_sum_lsc_cal){
+					return 1;
+	}else{
+					return 0;
+	}
+}
+
+static int read_hi556_af_info(void){
+  int otp_grp_flag = 0, af_start_addr = 0;
+  int check_sum_af = 0, check_sum_af_cal = 0;
+  int i;
+  /* lsc group 1 */
+  write_cmos_sensor_8(0x010a,((0x1a36)>>8)&0xff);
+  write_cmos_sensor_8(0x010b,(0x1a36)&0xff);
+  write_cmos_sensor_8(0x0102,0x01);
+  otp_grp_flag = read_cmos_sensor(0x0108);
+  LOG_INF("lsc_otp_grp1_flag = 0x%x\n",otp_grp_flag);
+  if(otp_grp_flag == 0x01)
+    af_start_addr = 0x1a37;
+  else if (otp_grp_flag == 0x13)
+    af_start_addr = 0x1a3d;
+  else if(otp_grp_flag == 0x37)
+    af_start_addr = 0x1a43;
+  else{
+    LOG_INF("no af OTP data return \n");
+    return 0;
+  }
+
+  if(af_start_addr != 0){
+    write_cmos_sensor_8(0x010a,((af_start_addr)>>8)&0xff);
+    write_cmos_sensor_8(0x010b,(af_start_addr)&0xff);
+    write_cmos_sensor_8(0x0102,0x01);
+    for(i = 0; i < AF_DATA_SIZE + 1; i++)
+    {
+      hi556_data_af[i] = read_cmos_sensor(0x0108);
+      LOG_INF("hi556_data_af[%d]=0x%x\n",i,hi556_data_af[i]);
+    }
+    for(i = 0; i < AF_DATA_SIZE; i++){
+      check_sum_af_cal += hi556_data_af[i];
+    }
+    LOG_INF("check_sum_af_cal =0x%x \n",check_sum_af_cal);
+    check_sum_af = hi556_data_af[AF_DATA_SIZE];
+    check_sum_af_cal = (check_sum_af_cal % 255) + 1;
+  }
+  LOG_INF("=== HI556 LSC check_sum_awb=0x%x, check_sum_awb_cal=0x%x ===\n", check_sum_af, check_sum_af_cal);
+  if(check_sum_af == check_sum_af_cal){
+					return 1;
+	}else{
+					return 0;
+	}
+}
+
+static int hi556_sensor_otp_info(void){
+	int ret = 0;
+
+	LOG_DBG("come to %s:%d E!\n", __func__, __LINE__);
+
+	/* 1. sensor init */
+	write_cmos_sensor(0x0e00, 0x0102); //tg_pmem_sckpw/sdly
+	write_cmos_sensor(0x0e02, 0x0102); //tg_pmem_sckpw/sdly
+	write_cmos_sensor(0x0e0c, 0x0100); //tg_pmem_rom_dly
+	write_cmos_sensor(0x27fe, 0xe000); // firmware start address-ROM
+	write_cmos_sensor(0x0b0e, 0x8600); // BGR enable
+	write_cmos_sensor(0x0d04, 0x0100); // STRB(OTP Busy) output enable
+	write_cmos_sensor(0x0d02, 0x0707); // STRB(OTP Busy) output drivability
+	write_cmos_sensor(0x0f30, 0x6e25); // Analog PLL setting
+	write_cmos_sensor(0x0f32, 0x7067); // Analog CLKGEN setting
+	write_cmos_sensor(0x0f02, 0x0106); // PLL enable
+	write_cmos_sensor(0x0a04, 0x0000); // mipi disable
+	write_cmos_sensor(0x0e0a, 0x0001); // TG PMEM CEN anable
+	write_cmos_sensor(0x004a, 0x0100); // TG MCU enable
+	write_cmos_sensor(0x003e, 0x1000); // ROM OTP Continuous W/R mode enable
+	write_cmos_sensor(0x0a00, 0x0100); // Stream ON
+
+	/* 2. init OTP setting*/
+	write_cmos_sensor_8(0x0A02, 0x01); //Fast sleep on
+	write_cmos_sensor_8(0x0A00, 0x00);//stand by on
+	mdelay(10);
+	write_cmos_sensor_8(0x0f02, 0x00);//pll disable
+	write_cmos_sensor_8(0x011a, 0x01);//CP TRIM_H
+	write_cmos_sensor_8(0x011b, 0x09);//IPGM TRIM_H
+	write_cmos_sensor_8(0x0d04, 0x01);//Fsync(OTP busy)Output Enable
+	write_cmos_sensor_8(0x0d00, 0x07);//Fsync(OTP busy)Output Drivability
+	write_cmos_sensor_8(0x003e, 0x10);//OTP r/w mode
+	write_cmos_sensor_8(0x0a00, 0x01);//standby off
+
+	/* 3. read eeprom data */
+	//minfo && awb group
+  ret = read_hi556_module_info();
+  if(ret != 1){
+    hi556_module_id = 0;
+    LOG_ERR("=== hi556_data_info invalid ===\n");
+  }
+  ret = read_hi556_awb_info();
+  if(ret != 1){
+    hi556_awb_valid = 0;
+    LOG_ERR("=== hi556_data_awb invalid ===\n");
+  }else{
+    hi556_awb_valid = 1;
+  }
+  ret = read_hi556_lsc_info();
+  if(ret != 1){
+    hi556_lsc_valid = 0;
+    LOG_ERR("=== hi556_data_lsc invalid ===\n");
+  }else{
+    hi556_lsc_valid = 1;
+  }
+
+  ret = read_hi556_af_info();
+  if(ret != 1){
+    hi556_af_valid = 0;
+    LOG_ERR("=== hi556_data_af invalid ===\n");
+  }else{
+    hi556_af_valid = 1;
+  }
+
+	/* 4. disable otp function */
+	hi556_disable_otp_func();
+  if(hi556_module_id == 0 || hi556_lsc_valid == 0 || hi556_awb_valid == 0 ||hi556_af_valid == 0){
+    return 0;
+  }else{
+    return 1;
+  }
 }
 
 static void set_dummy(void)
@@ -454,18 +747,18 @@ static void set_mirror_flip(kal_uint8 image_mirror)
 
 	switch (image_mirror) {
 	case IMAGE_NORMAL:
-		write_cmos_sensor(0x0000, 0x0000);
+		write_cmos_sensor(0x000e, 0x0000);
 		break;
 	case IMAGE_H_MIRROR:
-		write_cmos_sensor(0x0000, 0x0100);
+		write_cmos_sensor(0x000e, 0x0100);
 
 		break;
 	case IMAGE_V_MIRROR:
-		write_cmos_sensor(0x0000, 0x0200);
+		write_cmos_sensor(0x000e, 0x0200);
 
 		break;
 	case IMAGE_HV_MIRROR:
-		write_cmos_sensor(0x0000, 0x0300);
+		write_cmos_sensor(0x000e, 0x0300);
 
 		break;
 	default:
@@ -679,7 +972,7 @@ kal_uint16 addr_data_pair_init_hi556[] = {
 	0x306a, 0xf876,
 	0x006c, 0x0000,
 	0x005e, 0x0200,
-	0x000e, 0x0100,
+	0x000e, 0x0200,
 	0x0e0a, 0x0001,
 	0x004a, 0x0100,
 	0x004c, 0x0000,
@@ -912,7 +1205,7 @@ static void sensor_init(void)
 	write_cmos_sensor(0x306a, 0xf876);
 	write_cmos_sensor(0x006c, 0x0000);
 	write_cmos_sensor(0x005e, 0x0200);
-	write_cmos_sensor(0x000e, 0x0100); //org
+	write_cmos_sensor(0x000e, 0x0200); //org
 	//write_cmos_sensor(0x000e, 0x0000); //odin
 	write_cmos_sensor(0x0e0a, 0x0001);
 	write_cmos_sensor(0x004a, 0x0100);
@@ -1479,6 +1772,7 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 {
 	kal_uint8 i = 0;
 	kal_uint8 retry = 2;
+	int rc = 0;
 
 	while (imgsensor_info.i2c_addr_table[i] != 0xff) {
 		spin_lock(&imgsensor_drv_lock);
@@ -1487,11 +1781,18 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 		do {
 			*sensor_id = return_sensor_id();
 			if (*sensor_id == imgsensor_info.sensor_id) {
-			LOG_INF("i2c write id : 0x%x, sensor id: 0x%x\n",
-			imgsensor.i2c_write_id, *sensor_id);
-			return ERROR_NONE;
-			}
+				LOG_DBG("i2c write id  : 0x%x, sensor id: 0x%x\n", imgsensor.i2c_write_id,*sensor_id);
 
+				rc = hi556_sensor_otp_info();
+				if(rc == 0){
+					*sensor_id = 0xFFFFFFFF;
+					LOG_ERR("Hi556 read OTP:NOK");
+					return ERROR_SENSOR_CONNECT_FAIL;
+				}
+
+				return ERROR_NONE;
+			}
+			LOG_ERR("get_imgsensor_id Read sensor id fail, i2c write id: 0x%x,sensor id: 0x%x\n", imgsensor.i2c_write_id,*sensor_id);
 			retry--;
 		} while (retry > 0);
 		i++;
@@ -1608,6 +1909,7 @@ static kal_uint32 preview(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
 	imgsensor.autoflicker_en = KAL_FALSE;
 	spin_unlock(&imgsensor_drv_lock);
 	preview_setting();
+
 	return ERROR_NONE;
 }	/*	preview   */
 
@@ -1667,6 +1969,7 @@ static kal_uint32 normal_video(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
 	imgsensor.autoflicker_en = KAL_FALSE;
 	spin_unlock(&imgsensor_drv_lock);
 	capture_setting(imgsensor.current_fps);
+
 	return ERROR_NONE;
 }	/*	normal_video   */
 

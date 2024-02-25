@@ -12,6 +12,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/memblock.h>
 #include <linux/memory.h>
 #include <linux/workqueue.h>
 #include <linux/dma-mapping.h>
@@ -91,6 +92,141 @@ static bool cmdq_delay_thd_inited;
 #endif
 
 /* CMDQ core feature functions */
+
+static bool cmdq_core_check_gpr_valid(const u32 gpr, const bool val)
+{
+	if (val)
+		switch (gpr) {
+		case CMDQ_DATA_REG_JPEG:
+		case CMDQ_DATA_REG_PQ_COLOR:
+		case CMDQ_DATA_REG_2D_SHARPNESS_0:
+		case CMDQ_DATA_REG_2D_SHARPNESS_1:
+		case CMDQ_DATA_REG_DEBUG:
+			return true;
+		default:
+			return false;
+		}
+	else
+		switch (gpr >> 16) {
+		case CMDQ_DATA_REG_JPEG_DST:
+		case CMDQ_DATA_REG_PQ_COLOR_DST:
+		case CMDQ_DATA_REG_2D_SHARPNESS_0:
+		case CMDQ_DATA_REG_2D_SHARPNESS_0_DST:
+		case CMDQ_DATA_REG_2D_SHARPNESS_1_DST:
+		case CMDQ_DATA_REG_DEBUG_DST:
+			return true;
+		default:
+			return false;
+		}
+	return false;
+}
+
+static bool cmdq_core_check_dma_addr_valid(const unsigned long pa)
+{
+	struct WriteAddrStruct *waddr = NULL;
+	unsigned long flags = 0L;
+	phys_addr_t start = memblock_start_of_DRAM();
+	bool ret = false;
+
+	spin_lock_irqsave(&cmdq_write_addr_lock, flags);
+	list_for_each_entry(waddr, &cmdq_ctx.writeAddrList, list_node)
+		if (pa < start || pa - (unsigned long)waddr->pa <
+			waddr->count << 2) {
+			ret = true;
+			break;
+		}
+	spin_unlock_irqrestore(&cmdq_write_addr_lock, flags);
+	return ret;
+}
+
+static bool cmdq_core_check_instr_valid(const u64 instr)
+{
+	u32 op = instr >> 56, option = (instr >> 53) & 0x7;
+	u32 argA = (instr >> 32) & 0x1FFFFF, argB = instr & 0xFFFFFFFF;
+#ifdef CMDQ_MDP_ENABLE_SPR
+	u32 sOP = argA >> 16, argA_i = argA & 0xFFFF;
+	u32 argB_i = argB >> 16, argC_i = argB & 0xFFFF;
+#endif
+
+	switch (op) {
+	case CMDQ_CODE_WRITE:
+		if (!option)
+			return true;
+		if (option == 0x4 && cmdq_core_check_gpr_valid(argA, false))
+			return true;
+	case CMDQ_CODE_READ:
+		if (option == 0x2 && cmdq_core_check_gpr_valid(argB, true))
+			return true;
+		if (option == 0x6 && cmdq_core_check_gpr_valid(argA, false) &&
+			cmdq_core_check_gpr_valid(argB, true))
+			return true;
+		break;
+	case CMDQ_CODE_MOVE:
+		if (!option && !argA)
+			return true;
+		if (option == 0x4 && cmdq_core_check_gpr_valid(argA, false) &&
+			cmdq_core_check_dma_addr_valid(argB))
+			return true;
+		break;
+	case CMDQ_CODE_JUMP:
+		if (!argA && argB == 0x8)
+			return true;
+		break;
+#ifdef CMDQ_MDP_ENABLE_SPR
+	case CMDQ_CODE_READ_S:
+		if (option == 0x4 && argA_i == 1 && !argC_i)
+			return true;
+		break;
+	case CMDQ_CODE_WRITE_S:
+	case CMDQ_CODE_WRITE_S_W_MASK:
+		if (!option)
+			return true;
+		if (option == 0x2 && (!argB_i || argB_i == 1) && !argC_i)
+			return true;
+		break;
+	case CMDQ_CODE_LOGIC:
+		if (option == 0x4 && !sOP && !argA_i && !argB_i)
+			return true;
+		break;
+#else
+	case CMDQ_CODE_READ_S:
+	case CMDQ_CODE_WRITE_S:
+	case CMDQ_CODE_WRITE_S_W_MASK:
+	case CMDQ_CODE_LOGIC:
+		break;
+#endif
+	case CMDQ_CODE_JUMP_C_ABSOLUTE:
+	case CMDQ_CODE_JUMP_C_RELATIVE:
+		break;
+	default:
+		return true;
+	}
+	CMDQ_ERR("instr:%#llx\n", instr);
+	return false;
+}
+
+bool cmdq_core_check_pkt_valid(struct cmdq_pkt *pkt)
+{
+	struct cmdq_pkt_buffer *buf = NULL;
+	s32 size = CMDQ_CMD_BUFFER_SIZE;
+	u64 *va;
+	bool ret = true;
+
+	list_for_each_entry(buf, &pkt->buf, list_entry) {
+		if (list_is_last(&buf->list_entry, &pkt->buf))
+			size -= pkt->avail_buf_size;
+
+		for (va = (u64 *)buf->va_base; ret &&
+			(va + 1) < (u64 *)(buf->va_base + size); va++)
+			ret &= cmdq_core_check_instr_valid(*va);
+
+		if (ret && (*va >> 56) != CMDQ_CODE_JUMP)
+			ret &= cmdq_core_check_instr_valid(*va);
+		if (!ret)
+			break;
+	}
+	return ret;
+}
 
 static void cmdq_core_config_prefetch_gsize(void)
 {
@@ -1255,9 +1391,7 @@ void cmdq_core_dump_trigger_loop_thread(const char *tag)
 		cmdq_core_dump_thread(NULL, i, false, tag);
 		cmdq_core_dump_pc(NULL, i, tag);
 		val = cmdqCoreGetEvent(evt_rdma);
-		CMDQ_LOG("[%s]CMDQ_SYNC_TOKEN_VAL of %s is %d\n",
-			tag, cmdq_core_get_event_name_enum(evt_rdma),
-			val);
+		CMDQ_LOG("[%s]CMDQ_EVENT_DISP_RDMA0_EOF is %d\n", tag, val);
 		break;
 	}
 }
@@ -1970,6 +2104,8 @@ int cmdqCoreAllocWriteAddress(u32 count, dma_addr_t *paStart)
 
 		status = 0;
 
+		atomic_inc(&cmdq_ctx.write_addr_cnt);
+
 	} while (0);
 
 	if (status != 0) {
@@ -2022,6 +2158,51 @@ u32 cmdqCoreReadWriteAddress(dma_addr_t pa)
 	spin_unlock_irqrestore(&cmdq_write_addr_lock, flags);
 
 	return value;
+}
+
+void cmdqCoreReadWriteAddressBatch(u32 *addrs, u32 count, u32 *val_out)
+{
+	struct WriteAddrStruct *waddr, *cur_waddr = NULL;
+	unsigned long flags = 0L;
+	u32 i;
+	dma_addr_t pa;
+
+	/* search for the entry */
+	spin_lock_irqsave(&cmdq_write_addr_lock, flags);
+
+	CMDQ_PROF_MMP(cmdq_mmp_get_event()->read_reg,
+		MMPROFILE_FLAG_START, ((unsigned long)addrs),
+		(u32)atomic_read(&cmdq_ctx.write_addr_cnt));
+
+	for (i = 0; i < count; i++) {
+		pa = addrs[i];
+
+		if (!cur_waddr || pa < cur_waddr->pa ||
+			pa >= cur_waddr->pa + cur_waddr->count * sizeof(u32)) {
+			cur_waddr = NULL;
+			list_for_each_entry(waddr, &cmdq_ctx.writeAddrList,
+				list_node) {
+
+				if (pa < waddr->pa || pa >= waddr->pa +
+					waddr->count * sizeof(u32))
+					continue;
+				cur_waddr = waddr;
+				break;
+			}
+		}
+
+		if (cur_waddr)
+			val_out[i] = *((u32 *)(cur_waddr->va +
+				(pa - cur_waddr->pa)));
+		else
+			val_out[i] = 0;
+	}
+
+	CMDQ_PROF_MMP(cmdq_mmp_get_event()->read_reg,
+		MMPROFILE_FLAG_END, ((unsigned long)addrs), count);
+
+	spin_unlock_irqrestore(&cmdq_write_addr_lock, flags);
+
 }
 
 u32 cmdqCoreWriteWriteAddress(dma_addr_t pa, u32 value)
@@ -2108,6 +2289,8 @@ int cmdqCoreFreeWriteAddress(dma_addr_t paStart)
 
 	kfree(pWriteAddr);
 	pWriteAddr = NULL;
+
+	atomic_dec(&cmdq_ctx.write_addr_cnt);
 
 	return 0;
 }
@@ -3399,38 +3582,6 @@ static void cmdq_core_attach_engine_error(
 	}
 }
 
-void cmdq_core_dump_resource_status(enum cmdq_event resourceEvent)
-{
-	/* TODO: revise with resource list in mdp.c */
-#if 0
-	struct ResourceUnitStruct *pResource = NULL;
-
-	list_for_each_entry(pResource, &cmdq_ctx.resourceList,
-		list_entry) {
-		if (resourceEvent == pResource->lockEvent) {
-			CMDQ_ERR("[Res] Dump resource with event:%d\n",
-				resourceEvent);
-			mutex_lock(&gCmdqResourceMutex);
-			/* find matched resource */
-			CMDQ_ERR("[Res] Dump resource latest time:\n");
-			CMDQ_ERR("[Res]   notify:%llu delay:%lld\n",
-				pResource->notify, pResource->delay);
-			CMDQ_ERR("[Res]   lock:%llu unlock:%lld\n",
-				pResource->lock, pResource->unlock);
-			CMDQ_ERR("[Res]   acquire:%llu release:%lld\n",
-				pResource->acquire, pResource->release);
-			CMDQ_ERR("[Res] isUsed:%d isLend:%d isDelay:%d\n",
-				pResource->used, pResource->lend,
-				pResource->delaying);
-			if (!pResource->releaseCB)
-				CMDQ_ERR("[Res] release CB func is NULL\n");
-			mutex_unlock(&gCmdqResourceMutex);
-			break;
-		}
-	}
-#endif
-}
-
 static void cmdq_core_attach_error_handle_detail(
 	const struct cmdqRecStruct *handle, s32 thread,
 	const struct cmdqRecStruct **nghandle_out, const char **module_out,
@@ -3467,7 +3618,7 @@ static void cmdq_core_attach_error_handle_detail(
 		const u32 event = nginfo.inst[1] & ~0xFF000000;
 
 		if (event >= CMDQ_SYNC_RESOURCE_WROT0)
-			cmdq_core_dump_resource_status(event);
+			cmdq_mdp_dump_resource(event);
 	}
 
 	if (handle->scenario == CMDQ_SCENARIO_DISP_ESD_CHECK) {
@@ -4675,6 +4826,11 @@ void cmdq_pkt_release_handle(struct cmdqRecStruct *handle)
 
 	/* before stop job, decrease usage */
 	cmdq_core_clk_disable(handle);
+
+	/* stop callback */
+	if (handle->stop)
+		handle->stop(handle);
+
 	mutex_unlock(&cmdq_clock_mutex);
 
 	mutex_lock(&cmdq_handle_list_mutex);
@@ -4909,8 +5065,14 @@ s32 cmdq_pkt_wait_flush_ex_result(struct cmdqRecStruct *handle)
 		MMPROFILE_FLAG_PULSE, ((unsigned long)handle),
 		handle->wakedUp - handle->beginWait);
 
+	CMDQ_SYSTRACE_BEGIN("%s_wait_release\n", __func__);
 	cmdq_core_track_handle_record(handle, handle->thread);
 	cmdq_pkt_release_handle(handle);
+
+	CMDQ_SYSTRACE_END();
+	CMDQ_PROF_MMP(cmdq_mmp_get_event()->wait_task_clean,
+		MMPROFILE_FLAG_PULSE, ((unsigned long)handle->pkt),
+		handle->thread);
 
 	return status;
 }
@@ -5223,6 +5385,14 @@ s32 cmdq_helper_mbox_register(struct device *dev)
 	CMDQ_LOG("register client done count:%u\n", i);
 
 	cmdq_client_base = cmdq_register_device(dev);
+
+	/* for mm like mdp set large pool count */
+	for (i = CMDQ_DYNAMIC_THREAD_ID_START;
+		i < CMDQ_DYNAMIC_THREAD_ID_START + 3; i++) {
+		if (!cmdq_clients[i])
+			continue;
+		cmdq_mbox_pool_set_limit(cmdq_clients[i], CMDQ_DMA_POOL_COUNT);
+	}
 
 	return 0;
 }

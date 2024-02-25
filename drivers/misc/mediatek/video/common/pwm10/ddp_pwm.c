@@ -368,7 +368,7 @@ enum disp_pwm_id_t disp_pwm_get_main(void)
 	return g_pwm_main_id;
 }
 
-
+#include "lcm_drv.h"
 #ifndef CONFIG_FPGA_EARLY_PORTING
 static void disp_pwm_set_drverIC_en(enum disp_pwm_id_t id, int enabled)
 {
@@ -383,6 +383,9 @@ static void disp_pwm_set_drverIC_en(enum disp_pwm_id_t id, int enabled)
 			mt_set_gpio_out(GPIO_LCM_LED_EN, GPIO_OUT_ZERO);
 	}
 #endif
+	if (id == DISP_PWM0) {
+		lcm_backlight_enable(enabled);
+	}
 }
 
 static void disp_pwm_set_enabled(struct cmdqRecStruct *cmdq,
@@ -403,7 +406,7 @@ static void disp_pwm_set_enabled(struct cmdqRecStruct *cmdq,
 		/* Always use CPU to config DISP_PWM EN */
 		/* to avoid race condition */
 		DISP_REG_MASK(NULL, reg_base + DISP_PWM_EN_OFF, 0x1, 0x1);
-		PWM_MSG("PWN_EN (by CPU) = 0x1");
+		PWM_MSG("PWM_EN (by CPU) = 0x1");
 
 		disp_pwm_set_drverIC_en(id, enabled);
 	} else {
@@ -419,7 +422,7 @@ static void disp_pwm_set_enabled(struct cmdqRecStruct *cmdq,
 		/* to avoid race condition */
 		DISP_REG_MASK(NULL, reg_base + DISP_PWM_EN_OFF, 0x0, 0x1);
 #endif
-		PWM_MSG("PWN_EN (by CPU) = 0x0");
+		PWM_MSG("PWM_EN (by CPU) = 0x0");
 
 		disp_pwm_set_drverIC_en(id, enabled);
 	}

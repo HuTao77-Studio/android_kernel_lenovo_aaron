@@ -138,6 +138,7 @@ struct charger_ops {
 	int (*get_fod_status)(struct charger_device *dev, u8 *status);
 	int (*enable_fod_oneshot)(struct charger_device *dev, bool en);
 	int (*is_typec_ot)(struct charger_device *dev, bool *ot);
+	int (*hz_mode)(struct charger_device *chg_dev, bool en);
 };
 
 static inline void *charger_dev_get_drvdata(
@@ -280,6 +281,10 @@ extern int unregister_charger_device_notifier(
 				struct notifier_block *nb);
 extern int charger_dev_notify(
 	struct charger_device *charger_dev, int event);
+extern int charger_dev_hz_mode(struct charger_device *chg_dev, bool en);
+extern int pogo_enable_otg(bool en);
+extern int pogo_enable_wrx(bool en);
+extern int pogo_get_state(void);
 
 
 #endif /*LINUX_POWER_CHARGER_CLASS_H*/

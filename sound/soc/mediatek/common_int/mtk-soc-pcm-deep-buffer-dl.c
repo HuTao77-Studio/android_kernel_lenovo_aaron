@@ -303,6 +303,7 @@ static int mtk_deep_buffer_dl_close(struct snd_pcm_substream *substream)
 
 		RemoveMemifSubStream(deep_buffer_mem_blk, substream);
 
+
 		if (deep_buffer_dl_hdoutput == true) {
 			pr_debug("%s deep_buffer_dl_hdoutput == %d\n", __func__,
 				 deep_buffer_dl_hdoutput);
@@ -421,14 +422,18 @@ static int mtk_deep_buffer_dl_prepare(struct snd_pcm_substream *substream)
 
 			SetCLkMclk(Soc_Aud_I2S1,
 				   runtime->rate); /* select I2S */
+			
 			EnableI2SCLKDiv(Soc_Aud_I2S1_MCKDIV, true);
+
 		}
+
 
 		/* start I2S DAC out */
 		if (GetMemoryPathEnable(Soc_Aud_Digital_Block_I2S_OUT_DAC) ==
 		    false) {
 			SetMemoryPathEnable(Soc_Aud_Digital_Block_I2S_OUT_DAC,
 					    true);
+
 			SetI2SDacOut(substream->runtime->rate,
 				     deep_buffer_dl_hdoutput, mI2SWLen);
 			SetI2SDacEnable(true);

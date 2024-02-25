@@ -32,6 +32,10 @@ static uint32_t imsg_log_level = IMSG_LOG_LEVEL;
 static DEFINE_MUTEX(drv_load_mutex);
 unsigned long spi_ready_flag;
 
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
+uint32_t tzdriver_dynamical_debug_flag;
+#endif
+
 static ssize_t imsg_log_test_show(struct device *cd,
 			struct device_attribute *attr, char *buf)
 {
@@ -528,7 +532,51 @@ static ssize_t current_bind_cpu_show(struct device *dev,
 	s += sprintf(s, "%d\n", cpu);
 	return (ssize_t)(s - buf);
 }
+#ifdef CONFIG_MICROTRUST_TEST_DRIVERS
+static ssize_t current_bind_cpu_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t len)
+{
+	uint32_t cpu_id;
+
+	hex_str_to_value(buf, 8, &cpu_id);
+	IMSG_PRINTK("%s cpu_id: 0x%x\n", __func__, cpu_id);
+
+	notify_ree_result = tz_move_core(cpu_id);
+
+	return len;
+}
+static DEVICE_ATTR_RW(current_bind_cpu);
+#else
 static DEVICE_ATTR_RO(current_bind_cpu);
+#endif
+
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
+static ssize_t tzdriver_dynamical_debug_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	char *s = buf;
+
+	s += sprintf(s, "%d\n", tzdriver_dynamical_debug_flag);
+	return (ssize_t)(s - buf);
+}
+
+static ssize_t tzdriver_dynamical_debug_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t len)
+{
+	uint32_t value;
+
+	hex_str_to_value(buf, 8, &value);
+
+	if ((value == 0) || (value == 1))
+		tzdriver_dynamical_debug_flag = value;
+
+	return len;
+}
+static DEVICE_ATTR_RW(tzdriver_dynamical_debug);
+#endif
+
 
 static struct device_attribute *attr_list[] = {
 		&dev_attr_imsg_log_level,
@@ -542,6 +590,9 @@ static struct device_attribute *attr_list[] = {
 #endif
 		&dev_attr_notify_ree_dci_handler,
 		&dev_attr_current_bind_cpu,
+#ifdef CONFIG_MICROTRUST_TZDRIVER_DYNAMICAL_DEBUG
+		&dev_attr_tzdriver_dynamical_debug,
+#endif
 		NULL
 };
 

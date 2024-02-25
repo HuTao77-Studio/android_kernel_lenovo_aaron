@@ -113,7 +113,8 @@ void pd_chrdet_int_handler(void)
 		if (boot_mode == KERNEL_POWER_OFF_CHARGING_BOOT
 			|| boot_mode == LOW_POWER_OFF_CHARGING_BOOT) {
 			pr_notice("[%s] Unplug Charger/USB\n", __func__);
-			kernel_power_off();
+			//msleep(3000);
+			//kernel_power_off();
 		}
 	}
 
@@ -262,7 +263,8 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 		if (noti->typec_state.old_state == TYPEC_UNATTACHED &&
 			(noti->typec_state.new_state == TYPEC_ATTACHED_SNK ||
 		    noti->typec_state.new_state == TYPEC_ATTACHED_CUSTOM_SRC ||
-		    noti->typec_state.new_state == TYPEC_ATTACHED_NORP_SRC)) {
+		    noti->typec_state.new_state == TYPEC_ATTACHED_NORP_SRC ||
+			noti->typec_state.new_state == TYPEC_ATTACHED_DBGACC_SNK)) {
 			pr_info("%s USB Plug in, pol = %d\n", __func__,
 					noti->typec_state.polarity);
 			charger_ignore_usb(false);
@@ -283,7 +285,8 @@ static int pd_tcp_notifier_call(struct notifier_block *nb,
 #endif
 		} else if ((noti->typec_state.old_state == TYPEC_ATTACHED_SNK ||
 		    noti->typec_state.old_state == TYPEC_ATTACHED_CUSTOM_SRC ||
-			noti->typec_state.old_state == TYPEC_ATTACHED_NORP_SRC)
+			noti->typec_state.old_state == TYPEC_ATTACHED_NORP_SRC ||
+			noti->typec_state.old_state == TYPEC_ATTACHED_DBGACC_SNK)
 			&& noti->typec_state.new_state == TYPEC_UNATTACHED) {
 			if (tcpc_kpoc) {
 				vbus = battery_get_vbus();

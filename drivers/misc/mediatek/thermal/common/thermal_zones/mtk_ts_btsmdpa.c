@@ -56,7 +56,7 @@ static kuid_t uid = KUIDT_INIT(0);
 static kgid_t gid = KGIDT_INIT(1000);
 static DEFINE_SEMAPHORE(sem_mutex);
 
-static unsigned int interval;	/* seconds, 0 : no auto polling */
+static unsigned int interval = 1;	/* seconds, 0 : no auto polling */
 static int trip_temp[10] = { 120000, 110000, 100000, 90000, 80000,
 				70000, 65000, 60000, 55000, 50000 };
 
@@ -66,7 +66,7 @@ static int kernelmode;
 static int g_THERMAL_TRIP[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 static int num_trip;
-static char g_bind0[20] = { 0 };
+static char g_bind0[20] = {"mtk-cl-shutdown02"};
 static char g_bind1[20] = { 0 };
 static char g_bind2[20] = { 0 };
 static char g_bind3[20] = { 0 };
@@ -596,6 +596,23 @@ static __s16 mtk_ts_btsmdpa_volt_to_temp(__u32 dwVolt)
 
 	return BTSMDPA_TMP;
 }
+static char get_board[25];
+static int get_board_id(void)
+{
+        char* s1= "";
+
+        s1 = strstr(saved_command_line, "board_id=");
+        if(!s1) {
+                mtkts_btsmdpa_dprintk("hw_id not found in cmdline\n");
+                return -1;
+        }
+        //s1 += strlen("board_id=");
+        strncpy(get_board, s1, 20);
+        //get_board[10]='\0';
+        mtkts_btsmdpa_dprintk("board_id found in cmdline : %s\n", get_board);
+
+        return 0;
+}
 
 static int get_hw_btsmdpa_temp(void)
 {
@@ -668,7 +685,11 @@ static int get_hw_btsmdpa_temp(void)
 #endif
 	/* ret = ret*1800/4096;//82's ADC power */
 	mtkts_btsmdpa_dprintk("APtery output mV = %d\n", ret);
-	output = mtk_ts_btsmdpa_volt_to_temp(ret);
+	get_board_id();
+	if (strstr(get_board, "WIFI"))
+		output = 25;
+        else
+		output = mtk_ts_btsmdpa_volt_to_temp(ret);
 	mtkts_btsmdpa_dprintk("BTSMDPA output temperature = %d\n", output);
 	return output;
 }
@@ -1398,6 +1419,8 @@ static int __init mtkts_btsmdpa_init(void)
 		if (entry)
 			proc_set_user(entry, uid, gid);
 	}
+
+	mtkts_btsmdpa_register_thermal();
 #if 0
 	mtkTTimer_register("mtktsbtsmdpa", mtkts_btsmdpa_start_thermal_timer,
 					mtkts_btsmdpa_cancel_thermal_timer);

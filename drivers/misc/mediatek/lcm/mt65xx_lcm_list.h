@@ -294,7 +294,13 @@ extern struct LCM_DRIVER nt36672_fhdp_dsi_vdo_auo_lcm_drv;
 extern struct LCM_DRIVER nt36672_fhdp_dsi_vdo_auo_laneswap_lcm_drv;
 extern struct LCM_DRIVER ili9881h_hdp_dsi_vdo_ilitek_rt5081_19_9_lcm_drv;
 extern struct LCM_DRIVER hx83112b_fhdp_dsi_cmd_auo_rt5081_lcm_drv;
-
+extern struct LCM_DRIVER ft8201_wxga_vdo_incell_boe_lcm_drv;
+extern struct LCM_DRIVER ft8201_wxga_vdo_incell_inx_lcm_drv;
+extern struct LCM_DRIVER hx8279d_wuxga_vdo_oncell_boe_lcm_drv;
+extern struct LCM_DRIVER nt51021b_wuxga_vdo_oncell_auo_lcm_drv;
+/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, begin*/
+extern struct LCM_DRIVER virtual_dsi_vdo_default;
+/*bug 338360 - For panel not insert need close backlight and vbias, heming.wt, 20180202, end*/
 #ifdef BUILD_LK
 extern void mdelay(unsigned long msec);
 #endif

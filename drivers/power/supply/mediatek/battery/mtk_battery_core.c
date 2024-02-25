@@ -80,7 +80,8 @@
 #include "simulator_kernel.h"
 #endif
 
-
+#include "mtk_auxadc.h"
+#include <linux/hardware_info.h>
 
 /* ============================================================ */
 /* global variable */
@@ -355,12 +356,42 @@ void fgauge_get_profile_id(void)
 	gm.battery_id = 0;
 }
 #else
+#define BATTERY_ID_CHANNEL 4
+#define BATTERY_NUMBER 2
+signed int battery_id_vol[BATTERY_NUMBER] = {450000, -1};
+/*battery0 0v vol<0.45v,battery1 0.9v  0.45V<=vol<0.9v*/
 void fgauge_get_profile_id(void)
 {
-	if (get_ec()->debug_bat_id_en == 1)
+	int id_volt = 0;
+	int id = 0;
+	int ret = 0;
+
+	if (get_ec()->debug_bat_id_en == 1){
 		gm.battery_id = get_ec()->debug_bat_id_value;
-	else
-		gm.battery_id = BATTERY_PROFILE_ID;
+	}else{
+
+		ret = IMM_GetOneChannelValue_Cali(BATTERY_ID_CHANNEL, &id_volt);
+		if (ret != 0)
+			bm_debug("[%s]id_volt read fail\n", __func__);
+		else
+			bm_err("[%s]id_volt = %d\n", __func__, id_volt);
+
+		if ((sizeof(battery_id_vol) /
+			sizeof(int)) != BATTERY_NUMBER) {
+			bm_debug("[%s]error! voltage range incorrect!\n",
+				__func__);
+			return;
+		}
+
+		for (id = 0; id < BATTERY_NUMBER; id++) {
+			if (id_volt < battery_id_vol[id]) {
+				gm.battery_id = id;
+				break;
+			} else if (battery_id_vol[id] == -1) {
+				gm.battery_id = BATTERY_NUMBER - 1;
+			}
+		}
+	}
 
 	bm_err("[%s]Battery id=(%d) en:%d,%d\n",
 		__func__,
@@ -785,6 +816,15 @@ static void fg_custom_parse_table(const struct device_node *np,
 	}
 }
 
+void battery_setprop(const char *battery_name)
+{
+       if(battery_name==NULL){
+		     gm.battery_id = BATTERY_PROFILE_ID;
+		     hardwareinfo_set_prop(HARDWARE_BATTERY_ID, "Generic_Battery");
+	 }else{
+		     hardwareinfo_set_prop(HARDWARE_BATTERY_ID, battery_name);
+	}
+}
 
 void fg_custom_init_from_dts(struct platform_device *dev)
 {
@@ -793,15 +833,40 @@ void fg_custom_init_from_dts(struct platform_device *dev)
 	unsigned int val_0, val_1, val_2, val_3;
 	int ret, ret0, ret1, ret2, ret3;
 	int bat_id;
+	const char *battery_name  = NULL;
 #ifdef CONFIG_MTK_ADDITIONAL_BATTERY_TABLE
 	unsigned int val_4;
 	int ret4;
 #endif
 
-	fgauge_get_profile_id();
-	bat_id = gm.battery_id;
-
 	bm_err("%s\n", __func__);
+
+	fgauge_get_profile_id();
+	if (ACTIVE_TABLE == 0) {
+		switch (gm.battery_id) {
+		case 0:
+			of_property_read_string(np, "battery0_name", &battery_name);
+			battery_setprop(battery_name);
+			break;
+		case 1:
+			of_property_read_string(np, "battery1_name", &battery_name);
+			battery_setprop(battery_name);
+			break;
+		case 2:
+			of_property_read_string(np, "battery2_name", &battery_name);
+			battery_setprop(battery_name);
+			break;
+		case 3:
+			of_property_read_string(np, "battery3_name", &battery_name);
+			battery_setprop(battery_name);
+			break;
+		default:
+			battery_setprop(battery_name);
+			break;
+		}
+	}
+
+	bat_id = gm.battery_id;
 
 	if (!of_property_read_u32(np, "DISABLE_MTKBATTERY", &val)) {
 		gm.disable_mtkbattery = (int)val;
@@ -2303,11 +2368,6 @@ void fg_daemon_send_data(
 		prcv->size,
 		prcv->idx);
 
-		pret->type = prcv->type;
-		pret->total_size = prcv->total_size;
-		pret->size = prcv->size;
-		pret->idx = prcv->idx;
-
 
 	switch (prcv->type) {
 	case FGD_CMD_PARAM_T_CUSTOM:
@@ -3632,6 +3692,15 @@ void bmd_ctrl_cmd_from_user(void *nl_data, struct fgd_nl_msg_t *ret_msg)
 			gm.ui_soc = 50;
 		else
 			gm.ui_soc = (daemon_ui_soc + 50) / 100;
+
+		//+ExtB AKITA-8 modify guojunbo.wt 20190527 disable battery temperature protect
+#ifdef CONFIG_MTK_DISABLE_TEMP_PROTECT
+		if (gm.ui_soc < 5) {
+			bm_err("CONFIG_MTK_DISABLE_TEMP_PROTECT,  gm.ui_soc:%d\n",gm.ui_soc);
+			gm.ui_soc = 4;
+		}
+#endif
+		//-ExtB AKITA-8 modify guojunbo.wt 20190527 disable battery temperature protect
 
 		/* when UISOC changes, check the diff time for smooth */
 		if (old_uisoc != gm.ui_soc) {
